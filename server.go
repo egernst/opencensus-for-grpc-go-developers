@@ -23,14 +23,15 @@ import (
 
 	"google.golang.org/grpc"
 
-	xray "github.com/census-instrumentation/opencensus-go-exporter-aws"
-	"go.opencensus.io/exporter/prometheus"
-	"go.opencensus.io/exporter/stackdriver"
+	"contrib.go.opencensus.io/exporter/prometheus"
+	"contrib.go.opencensus.io/exporter/zipkin"
 	"go.opencensus.io/plugin/ocgrpc"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 
-	"./rpc"
+	openzipkin "github.com/openzipkin/zipkin-go"
+	zipkinHTTP "github.com/openzipkin/zipkin-go/reporter/http"
+	"github.com/orijtech/opencensus-for-grpc-go-developers/rpc"
 )
 
 type fetchIt int
@@ -48,6 +49,7 @@ func (fi *fetchIt) Capitalize(ctx context.Context, in *rpc.Payload) (*rpc.Payloa
 	out := &rpc.Payload{
 		Data: bytes.ToUpper(in.Data),
 	}
+	span.Annotate([]trace.Attribute{trace.StringAttribute("name", "eric")}, "spaghetti")
 	return out, nil
 }
 
@@ -92,20 +94,14 @@ func createAndRegisterExporters() {
 		log.Fatal(http.ListenAndServe(":9888", mux))
 	}()
 
-	// 2. AWS X-Ray
-	xe, err := xray.NewExporter(xray.WithVersion("latest"))
+	// 2. Register Zipkin
+	localEndpoint, err := openzipkin.NewEndpoint("mygRPCServerZipkin", "192.168.1.61:8080")
 	if err != nil {
-		log.Fatalf("Failed to create AWS X-Ray exporter: %v", err)
+		log.Fatalf("Failed to create Zipkin exporter: %v", err)
 	}
-	trace.RegisterExporter(xe)
+	reporter := zipkinHTTP.NewReporter("http://localhost:9411/api/v2/spans")
+	exporter := zipkin.NewExporter(reporter, localEndpoint)
+	trace.RegisterExporter(exporter)
+	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
 
-	// 3. Stackdriver Tracing and Monitoring
-	se, err := stackdriver.NewExporter(stackdriver.Options{
-		MetricPrefix: prefix,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create Stackdriver exporter: %v", err)
-	}
-	view.RegisterExporter(se)
-	trace.RegisterExporter(se)
 }
